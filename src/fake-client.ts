@@ -1,32 +1,54 @@
 import WebSocket from "ws";
 
+import {
+    MessageType,
+    type ClientAuthMessage,
+    type VehicleControlMessage,
+    type VehicleTelemetryPayload
+} from "./protocol.js";
+
+
 const socket = new WebSocket("ws://127.0.0.1:8080");
 
 let sequence = 1;
 
-function sendControl(throttle: number, steering: number) {
-    socket.send(JSON.stringify({
-        type: "vehicle.control",
+
+function sendControl(
+    throttle: number,
+    steering: number
+) {
+    const message: VehicleControlMessage = {
+        type: MessageType.VEHICLE_CONTROL,
         payload: {
             throttle,
             steering,
             sequence
         }
-    }));
+    };
 
-    console.log(`Control sent: throttle=${throttle}, steering=${steering}, sequence=${sequence}`);
+    socket.send(JSON.stringify(message));
+
+    console.log(
+        `Control sent: throttle=${throttle}, ` +
+        `steering=${steering}, ` +
+        `sequence=${sequence}`
+    );
+
     sequence++;
 }
+
 
 socket.on("open", () => {
     console.log("Connected to gateway");
 
-    socket.send(JSON.stringify({
-        type: "client.auth",
+    const authMessage: ClientAuthMessage = {
+        type: MessageType.CLIENT_AUTH,
         payload: {
             clientId: "web-client-001"
         }
-    }));
+    };
+
+    socket.send(JSON.stringify(authMessage));
 
     console.log("Client auth sent");
 
@@ -42,26 +64,35 @@ socket.on("message", (data) => {
     try {
         message = JSON.parse(data.toString());
     } catch {
-        console.error("Invalid message received from gateway");
+        console.error(
+            "Invalid message received from gateway"
+        );
         return;
     }
 
-    if (message.type === "vehicle.telemetry") {
-        const { batteryVoltage, speed } = message.payload;
+    if (message.type === MessageType.VEHICLE_TELEMETRY) {
+        const payload =
+            message.payload as VehicleTelemetryPayload;
 
         console.log(
-            `Telemetry received: batteryVoltage=${batteryVoltage}, speed=${speed}`
+            `Telemetry received: ` +
+            `batteryVoltage=${payload.batteryVoltage}, ` +
+            `speed=${payload.speed}`
         );
 
         return;
     }
 
-    console.log("Message received from gateway:", message);
+    console.log(
+        "Message received from gateway:",
+        message
+    );
 });
 
 
 socket.on("close", () => {
     console.log("Disconnected from gateway");
 });
+
 
 socket.on("error", console.error);

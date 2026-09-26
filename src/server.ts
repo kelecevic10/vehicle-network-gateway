@@ -1,4 +1,9 @@
 import WebSocket, { WebSocketServer } from "ws"
+import {
+    MessageType,
+    type VehicleControlPayload
+} from "./protocol.js";
+
 
 const server = new WebSocketServer({
     host: "127.0.0.1",
@@ -28,7 +33,7 @@ server.on("connection", (socket) => {
             return; 
         }
 
-        if (message.type === "device.auth") {
+        if (message.type === MessageType.DEVICE_AUTH) {
             if (vehicleSocket && vehicleSocket.readyState === WebSocket.OPEN) {
                 console.error("Vehicle is already registered"); 
                 return; 
@@ -40,7 +45,7 @@ server.on("connection", (socket) => {
             return; 
         }
 
-        if (message.type === "client.auth") {
+        if (message.type === MessageType.CLIENT_AUTH) {
             const clientId = message.payload?.clientId; 
 
             if (typeof clientId !== "string" || clientId.trim().length === 0) {
@@ -54,7 +59,7 @@ server.on("connection", (socket) => {
             return; 
         }
 
-        if (message.type === "vehicle.control") {
+        if (message.type === MessageType.VEHICLE_CONTROL) {
             const clientId = webClients.get(socket); 
 
             if (!clientId) {
@@ -75,21 +80,23 @@ server.on("connection", (socket) => {
                 return; 
             }
 
+            const controlPayload = payload as VehicleControlPayload;
+
             vehicleSocket.send(
                  JSON.stringify(message)
             );
 
             console.log(
                 `Control forwarded from ${clientId}: ` +
-                `throttle=${payload.throttle}, ` +
-                `steering=${payload.steering}, ` +
-                `sequence=${payload.sequence}`
+                `throttle=${controlPayload.throttle}, ` +
+                `steering=${controlPayload.steering}, ` +
+                `sequence=${controlPayload.sequence}`
             );
 
             return; 
         }
 
-        if (message.type === "vehicle.telemetry") {
+        if (message.type === MessageType.VEHICLE_TELEMETRY) {
             if (socket !== vehicleSocket) {
                 console.error("Only vehicle can produce telemetry!"); 
                 return; 
