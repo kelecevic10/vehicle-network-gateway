@@ -3,6 +3,7 @@ import {
     GatewayAckMessage,
     GatewayErrorMessage,
     MessageType,
+    VehicleStatusMessage,
     type VehicleControlPayload
 } from "./protocol.js";
 
@@ -47,6 +48,16 @@ server.on("connection", (socket) => {
             
             console.log("Vehicle registered"); 
             sendAck(socket, MessageType.DEVICE_AUTH); 
+
+            const statusMessage: VehicleStatusMessage = {
+                type: MessageType.VEHICLE_STATUS,
+                payload: {
+                    online: true
+                }
+            };
+
+            broadcastToWebClients(statusMessage); 
+
             return; 
         }
 
@@ -136,8 +147,17 @@ server.on("connection", (socket) => {
     socket.on("close", () => {
         if (socket === vehicleSocket) {
             vehicleSocket = null; 
-
             console.log("Vehicle disconnected"); 
+
+            const statusMessage: VehicleStatusMessage = {
+                type: MessageType.VEHICLE_STATUS,
+                payload: {
+                    online: false
+                }
+            };
+
+            broadcastToWebClients(statusMessage); 
+
             return; 
         }
 
@@ -239,4 +259,14 @@ function sendError(socket: WebSocket, errorMessage: string): void {
     };
 
     socket.send(JSON.stringify(message)); 
+}
+
+function broadcastToWebClients(message: object): void {
+    const serializedMessage = JSON.stringify(message); 
+
+    for (const clientSocket of webClients.keys()) {
+        if (clientSocket.readyState === WebSocket.OPEN) {
+            clientSocket.send(serializedMessage); 
+        }
+    }
 }

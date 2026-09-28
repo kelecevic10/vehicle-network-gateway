@@ -6,7 +6,8 @@ import {
     type VehicleControlMessage,
     type VehicleTelemetryPayload,
     type GatewayAckPayload,
-    type GatewayErrorPayload
+    type GatewayErrorPayload,
+    VehicleStatusPayload
 } from "./protocol.js";
 
 
@@ -112,6 +113,13 @@ socket.on("message", (data) => {
         return;
     }
 
+    if (message.type === MessageType.VEHICLE_STATUS) {
+        const payload = message.payload as VehicleStatusPayload;
+
+        console.log(`Vehicle online status: ${payload.online}`); 
+        
+        return; 
+    }
 
     console.log(
         "Message received from gateway:",

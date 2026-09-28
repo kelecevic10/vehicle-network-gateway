@@ -4,9 +4,11 @@ export const MessageType = {
     CLIENT_AUTH: "client.auth",
     VEHICLE_CONTROL: "vehicle.control",
     VEHICLE_TELEMETRY: "vehicle.telemetry", 
-    
+    VEHICLE_STATUS: "vehicle.status",
+
     GATEWAY_ACK: "gateway.ack", 
     GATEWAY_ERROR: "gateway.error", 
+
 } as const; 
 
 export type ClientAuthPayload = {
@@ -60,3 +62,12 @@ export type GatewayErrorMessage = {
     type: typeof MessageType.GATEWAY_ERROR;
     payload: GatewayErrorPayload;
 }; 
+
+export type VehicleStatusPayload = {
+    online: boolean;
+}; 
+
+export type VehicleStatusMessage = {
+    type: typeof MessageType.VEHICLE_STATUS;
+    payload: VehicleStatusPayload;
+}
