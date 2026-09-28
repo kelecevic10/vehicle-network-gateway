@@ -4,7 +4,9 @@ import {
     MessageType,
     type ClientAuthMessage,
     type VehicleControlMessage,
-    type VehicleTelemetryPayload
+    type VehicleTelemetryPayload,
+    type GatewayAckPayload,
+    type GatewayErrorPayload
 } from "./protocol.js";
 
 
@@ -51,10 +53,6 @@ socket.on("open", () => {
     socket.send(JSON.stringify(authMessage));
 
     console.log("Client auth sent");
-
-    setTimeout(() => {
-        sendControl(0.5, 0.65);
-    }, 2000);
 });
 
 
@@ -70,6 +68,37 @@ socket.on("message", (data) => {
         return;
     }
 
+
+    if (message.type === MessageType.GATEWAY_ACK) {
+        const payload =
+            message.payload as GatewayAckPayload;
+
+        console.log(
+            `Gateway ACK received for: ${payload.for}`
+        );
+
+        if (payload.for === MessageType.CLIENT_AUTH) {
+            setTimeout(() => {
+                sendControl(0.5, 0.65);
+            }, 2000);
+        }
+
+        return;
+    }
+
+
+    if (message.type === MessageType.GATEWAY_ERROR) {
+        const payload =
+            message.payload as GatewayErrorPayload;
+
+        console.error(
+            `Gateway error: ${payload.message}`
+        );
+
+        return;
+    }
+
+
     if (message.type === MessageType.VEHICLE_TELEMETRY) {
         const payload =
             message.payload as VehicleTelemetryPayload;
@@ -82,6 +111,7 @@ socket.on("message", (data) => {
 
         return;
     }
+
 
     console.log(
         "Message received from gateway:",

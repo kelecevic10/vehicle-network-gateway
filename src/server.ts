@@ -1,5 +1,7 @@
 import WebSocket, { WebSocketServer } from "ws"
 import {
+    GatewayAckMessage,
+    GatewayErrorMessage,
     MessageType,
     type VehicleControlPayload
 } from "./protocol.js";
@@ -30,18 +32,21 @@ server.on("connection", (socket) => {
             message = JSON.parse(data.toString()); 
         } catch {
             console.log("Invalid JSON"); 
+            sendError(socket, "Invalid JSON"); 
             return; 
         }
 
         if (message.type === MessageType.DEVICE_AUTH) {
             if (vehicleSocket && vehicleSocket.readyState === WebSocket.OPEN) {
                 console.error("Vehicle is already registered"); 
+                sendError(socket, "Vehicle is already registered"); 
                 return; 
             }
             
             vehicleSocket = socket; 
             
             console.log("Vehicle registered"); 
+            sendAck(socket, MessageType.DEVICE_AUTH); 
             return; 
         }
 
@@ -50,12 +55,14 @@ server.on("connection", (socket) => {
 
             if (typeof clientId !== "string" || clientId.trim().length === 0) {
                 console.log("Invalid client ID"); 
+                sendError(socket, "Invalid client ID"); 
                 return;
             }
 
             webClients.set(socket, clientId); 
 
             console.log(`Web client registered: ${clientId}`); 
+            sendAck(socket, MessageType.CLIENT_AUTH); 
             return; 
         }
 
@@ -63,12 +70,14 @@ server.on("connection", (socket) => {
             const clientId = webClients.get(socket); 
 
             if (!clientId) {
-                console.error("Control rejected: sender is not a registred web client"); 
+                console.error("Control rejected: sender is not a registered web client");
+                sendError(socket, "Control rejected: sender is not a registered web client");  
                 return; 
             }
             
             if (!vehicleSocket || vehicleSocket.readyState !== WebSocket.OPEN) {
                 console.error("Control rejected: vehicle is offline"); 
+                sendError(socket, "Control rejected: vehicle is offline"); 
                 return; 
             }
 
@@ -77,6 +86,7 @@ server.on("connection", (socket) => {
             const validationError = validateControlPayload(payload); 
             if (validationError) {
                 console.error(validationError); 
+                sendError(socket, validationError); 
                 return; 
             }
 
@@ -98,13 +108,15 @@ server.on("connection", (socket) => {
 
         if (message.type === MessageType.VEHICLE_TELEMETRY) {
             if (socket !== vehicleSocket) {
-                console.error("Only vehicle can produce telemetry!"); 
+                console.error("Only vehicle can produce telemetry!");
+                sendError(socket, "Only vehicle can produce telemetry!");  
                 return; 
             }
 
             const validationError = validateTelemetryPayload(message.payload); 
             if (validationError) {
                 console.error(validationError); 
+                sendError(socket, validationError);
                 return; 
             }
 
@@ -116,7 +128,9 @@ server.on("connection", (socket) => {
             return; 
         }
 
-        console.log("Message from unidentificated connection:", message); 
+        const error = `Unsupported message type: ${message.type}`;
+        console.error(error);   
+        sendError(socket, error);
     }); 
 
     socket.on("close", () => {
@@ -195,4 +209,34 @@ function validateTelemetryPayload(payload: unknown): string | null {
     }
 
     return null;
+}
+
+function sendAck(socket: WebSocket, messageType: string): void {
+    if (socket.readyState !== WebSocket.OPEN) {
+        return; 
+    }
+
+    const ackMessage : GatewayAckMessage = {
+        type: MessageType.GATEWAY_ACK, 
+        payload: {
+            for: messageType
+        }
+    };
+
+    socket.send(JSON.stringify(ackMessage)); 
+}
+
+function sendError(socket: WebSocket, errorMessage: string): void {
+    if (socket.readyState !== WebSocket.OPEN) {
+        return;
+    }
+
+    const message: GatewayErrorMessage = {
+        type: MessageType.GATEWAY_ERROR, 
+        payload: {
+            message: errorMessage
+        }
+    };
+
+    socket.send(JSON.stringify(message)); 
 }
