@@ -3,17 +3,43 @@ import WebSocket from "ws";
 import {
     MessageType,
     type ClientAuthMessage,
+    type ControlAcquireMessage,
+    type ControlReleaseMessage,
     type VehicleControlMessage,
     type VehicleTelemetryPayload,
+    type VehicleStatusPayload,
     type GatewayAckPayload,
-    type GatewayErrorPayload,
-    VehicleStatusPayload
+    type GatewayErrorPayload
 } from "./protocol.js";
 
 
 const socket = new WebSocket("ws://127.0.0.1:8080");
 
+const clientId = process.argv[2] ?? "web-client-001";
+
 let sequence = 1;
+
+
+function acquireControl() {
+    const message: ControlAcquireMessage = {
+        type: MessageType.CONTROL_ACQUIRE
+    };
+
+    socket.send(JSON.stringify(message));
+
+    console.log("Control acquire requested");
+}
+
+
+function releaseControl() {
+    const message: ControlReleaseMessage = {
+        type: MessageType.CONTROL_RELEASE
+    };
+
+    socket.send(JSON.stringify(message));
+
+    console.log("Control release requested");
+}
 
 
 function sendControl(
@@ -47,13 +73,13 @@ socket.on("open", () => {
     const authMessage: ClientAuthMessage = {
         type: MessageType.CLIENT_AUTH,
         payload: {
-            clientId: "web-client-001"
+            clientId
         }
     };
 
     socket.send(JSON.stringify(authMessage));
 
-    console.log("Client auth sent");
+    console.log(`Client auth sent: ${clientId}`);
 });
 
 
@@ -78,11 +104,27 @@ socket.on("message", (data) => {
             `Gateway ACK received for: ${payload.for}`
         );
 
+
         if (payload.for === MessageType.CLIENT_AUTH) {
+            acquireControl();
+            return;
+        }
+
+
+        if (payload.for === MessageType.CONTROL_ACQUIRE) {
             setTimeout(() => {
                 sendControl(0.5, 0.65);
             }, 2000);
+
+            return;
         }
+
+
+        if (payload.for === MessageType.CONTROL_RELEASE) {
+            console.log("Control successfully released");
+            return;
+        }
+
 
         return;
     }
@@ -113,13 +155,18 @@ socket.on("message", (data) => {
         return;
     }
 
-    if (message.type === MessageType.VEHICLE_STATUS) {
-        const payload = message.payload as VehicleStatusPayload;
 
-        console.log(`Vehicle online status: ${payload.online}`); 
-        
-        return; 
+    if (message.type === MessageType.VEHICLE_STATUS) {
+        const payload =
+            message.payload as VehicleStatusPayload;
+
+        console.log(
+            `Vehicle online status: ${payload.online}`
+        );
+
+        return;
     }
+
 
     console.log(
         "Message received from gateway:",

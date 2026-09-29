@@ -3,6 +3,7 @@ import {
     GatewayAckMessage,
     GatewayErrorMessage,
     MessageType,
+    VehicleControlMessage,
     VehicleStatusMessage,
     type VehicleControlPayload
 } from "./protocol.js";
@@ -15,6 +16,8 @@ const server = new WebSocketServer({
 
 let vehicleSocket: WebSocket | null = null; 
 const webClients = new Map<WebSocket, string>(); 
+const socketLiveness = new Map<WebSocket, boolean>();
+let activeController: WebSocket | null = null; 
 
 server.on("listening", () => {
     console.log("Gateway listening on ws://127.0.0.1:8080");
@@ -25,7 +28,14 @@ server.on("error", console.error);
 server.on("connection", (socket) => {
     console.log("New connection");
 
+    socketLiveness.set(socket, true); 
+
+    socket.on("pong", () => {
+        socketLiveness.set(socket, true); 
+    });
+
     socket.on("error", console.error); 
+
     socket.on("message", (data) => {
         let message; 
 
@@ -74,6 +84,62 @@ server.on("connection", (socket) => {
 
             console.log(`Web client registered: ${clientId}`); 
             sendAck(socket, MessageType.CLIENT_AUTH); 
+
+            const vehicleOnline = 
+                vehicleSocket !== null && 
+                vehicleSocket.readyState === WebSocket.OPEN;  
+
+            const vehicleStatusMessage: VehicleStatusMessage = {
+                type: MessageType.VEHICLE_STATUS, 
+                payload: {
+                    online: vehicleOnline
+                }
+            }
+
+            socket.send(JSON.stringify(vehicleStatusMessage)); 
+
+            return; 
+        }
+
+        if (message.type === MessageType.CONTROL_ACQUIRE) {
+            const clientId = webClients.get(socket); 
+
+            if (!clientId) {
+                console.error("Control acquire rejected: sender is not a registered web client"); 
+                sendError(socket, "You are not registered as an web client!"); 
+                return; 
+            }
+            
+            if (activeController) {
+                console.error(`Control acquire rejected for ${clientId}: controller already exists`);
+                sendError(socket, "Vehicle control is already acquired");
+                return;   
+            }
+
+            activeController = socket; 
+            sendAck(socket, MessageType.CONTROL_ACQUIRE); 
+            return; 
+        }
+
+        if (message.type === MessageType.CONTROL_RELEASE) {
+            const clientId = webClients.get(socket);
+
+            if (!clientId) {
+                console.error("Control release rejected: sender is not a registered web client");
+                sendError(socket, "You are not registered as a web client");
+                return;
+            }
+
+            if (socket !== activeController) {
+                const clientId = webClients.get(socket); 
+                console.log(`The client ${clientId} tried to release the controller, but is not an active controller`); 
+                sendError(socket, "You are not an active controller, thus cannot release control!"); 
+                return; 
+            }
+
+            activeController = null; 
+            sendAck(socket, MessageType.CONTROL_RELEASE); 
+
             return; 
         }
 
@@ -86,6 +152,11 @@ server.on("connection", (socket) => {
                 return; 
             }
             
+            if (socket !== activeController) {
+                sendError(socket, "You dont have permission to control the vehicle!"); 
+                return; 
+            }
+
             if (!vehicleSocket || vehicleSocket.readyState !== WebSocket.OPEN) {
                 console.error("Control rejected: vehicle is offline"); 
                 sendError(socket, "Control rejected: vehicle is offline"); 
@@ -145,6 +216,12 @@ server.on("connection", (socket) => {
     }); 
 
     socket.on("close", () => {
+        socketLiveness.delete(socket); 
+
+        if (socket === activeController) {
+            activeController = null; 
+        }
+
         if (socket === vehicleSocket) {
             vehicleSocket = null; 
             console.log("Vehicle disconnected"); 
@@ -270,3 +347,27 @@ function broadcastToWebClients(message: object): void {
         }
     }
 }
+
+// server.clients contains all currently connected WebSocket clients,
+// regardless of whether they are the vehicle or a web client.
+const hearbeatInterval = setInterval(() => {
+    for (const clientSocket of server.clients) {
+        const isAlive = socketLiveness.get(clientSocket); 
+
+        if (!isAlive) {
+            console.log("Dead connection detected"); 
+
+            socketLiveness.delete(clientSocket); 
+            clientSocket.terminate(); 
+
+            continue; 
+        }
+
+        socketLiveness.set(clientSocket, false); 
+        clientSocket.ping(); 
+    }
+}, 10_000); 
+
+server.on("close", () => {
+    clearInterval(hearbeatInterval); 
+}); 

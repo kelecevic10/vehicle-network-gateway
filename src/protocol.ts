@@ -2,6 +2,10 @@
 export const MessageType = {
     DEVICE_AUTH: "device.auth",
     CLIENT_AUTH: "client.auth",
+    
+    CONTROL_ACQUIRE: "control.acquire",
+    CONTROL_RELEASE: "control.release",
+    
     VEHICLE_CONTROL: "vehicle.control",
     VEHICLE_TELEMETRY: "vehicle.telemetry", 
     VEHICLE_STATUS: "vehicle.status",
@@ -71,3 +75,11 @@ export type VehicleStatusMessage = {
     type: typeof MessageType.VEHICLE_STATUS;
     payload: VehicleStatusPayload;
 }
+
+export type ControlAcquireMessage = {
+    type: typeof MessageType.CONTROL_ACQUIRE;
+}; 
+
+export type ControlReleaseMessage = {
+    type: typeof MessageType.CONTROL_RELEASE; 
+}; 
