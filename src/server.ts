@@ -15,10 +15,11 @@ import {
     validateTelemetryPayload
 } from "./validators.js";
 
+import { config } from "./config.js";
 
 const server = new WebSocketServer({
-    host: "127.0.0.1",
-    port: 8080,
+    host: config.host,
+    port: config.port
 });
 
 let vehicleSocket: WebSocket | null = null; 
@@ -27,7 +28,7 @@ const socketLiveness = new Map<WebSocket, boolean>();
 let activeController: WebSocket | null = null; 
 
 server.on("listening", () => {
-    console.log("Gateway listening on ws://127.0.0.1:8080");
+    console.log(`Gateway listening on ws://${config.host}:${config.port}`);
 });
 
 server.on("error", console.error); 
@@ -51,6 +52,12 @@ server.on("connection", (socket) => {
         } catch {
             console.log("Invalid JSON"); 
             sendError(socket, "Invalid JSON"); 
+            return; 
+        }
+
+        if (!message || typeof message !== "object" || typeof message.type !== "string") {
+            console.error("Invalid message format");
+            sendError(socket, "Invalid message format"); 
             return; 
         }
 
@@ -95,7 +102,10 @@ server.on("connection", (socket) => {
 
         if (socket === vehicleSocket) {
             vehicleSocket = null; 
+            activeController = null; 
+
             console.log("Vehicle disconnected"); 
+            console.log("Active controller released"); 
 
             const statusMessage: VehicleStatusMessage = {
                 type: MessageType.VEHICLE_STATUS,
@@ -179,6 +189,12 @@ function handleControlAcquire(socket: WebSocket): void {
         return; 
     }
     
+    if (!vehicleSocket || vehicleSocket.readyState !== WebSocket.OPEN) {
+        console.error(`Control acquire rejected for ${clientId}: vehicle is offline`); 
+        sendError(socket, "Cannot acquire control while vehicle is offline"); 
+        return; 
+    }
+
     if (activeController) {
         console.error(`Control acquire rejected for ${clientId}: controller already exists`);
         sendError(socket, "Vehicle control is already acquired");

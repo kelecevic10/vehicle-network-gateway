@@ -4,7 +4,7 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "tsx src/server.ts",
+    "dev": "node --env-file=.env --import tsx src/server.ts",
     "typecheck": "tsc --noEmit"
   },
   "keywords": [],
