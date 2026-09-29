@@ -1,12 +1,19 @@
 import WebSocket, { WebSocketServer } from "ws"
 import {
-    GatewayAckMessage,
-    GatewayErrorMessage,
     MessageType,
-    VehicleControlMessage,
-    VehicleStatusMessage,
-    type VehicleControlPayload
+    type ClientAuthMessage,
+    type VehicleControlMessage,
+    type VehicleControlPayload,
+    type VehicleStatusMessage,
+    type GatewayAckMessage,
+    type GatewayErrorMessage,
+    type VehicleTelemetryMessage
 } from "./protocol.js";
+
+import {
+    validateControlPayload,
+    validateTelemetryPayload
+} from "./validators.js";
 
 
 const server = new WebSocketServer({
@@ -47,172 +54,36 @@ server.on("connection", (socket) => {
             return; 
         }
 
-        if (message.type === MessageType.DEVICE_AUTH) {
-            if (vehicleSocket && vehicleSocket.readyState === WebSocket.OPEN) {
-                console.error("Vehicle is already registered"); 
-                sendError(socket, "Vehicle is already registered"); 
-                return; 
-            }
-            
-            vehicleSocket = socket; 
-            
-            console.log("Vehicle registered"); 
-            sendAck(socket, MessageType.DEVICE_AUTH); 
-
-            const statusMessage: VehicleStatusMessage = {
-                type: MessageType.VEHICLE_STATUS,
-                payload: {
-                    online: true
-                }
-            };
-
-            broadcastToWebClients(statusMessage); 
-
-            return; 
-        }
-
-        if (message.type === MessageType.CLIENT_AUTH) {
-            const clientId = message.payload?.clientId; 
-
-            if (typeof clientId !== "string" || clientId.trim().length === 0) {
-                console.log("Invalid client ID"); 
-                sendError(socket, "Invalid client ID"); 
+        switch (message.type) {
+            case MessageType.DEVICE_AUTH:
+                handleDeviceAuth(socket);
                 return;
-            }
 
-            webClients.set(socket, clientId); 
-
-            console.log(`Web client registered: ${clientId}`); 
-            sendAck(socket, MessageType.CLIENT_AUTH); 
-
-            const vehicleOnline = 
-                vehicleSocket !== null && 
-                vehicleSocket.readyState === WebSocket.OPEN;  
-
-            const vehicleStatusMessage: VehicleStatusMessage = {
-                type: MessageType.VEHICLE_STATUS, 
-                payload: {
-                    online: vehicleOnline
-                }
-            }
-
-            socket.send(JSON.stringify(vehicleStatusMessage)); 
-
-            return; 
-        }
-
-        if (message.type === MessageType.CONTROL_ACQUIRE) {
-            const clientId = webClients.get(socket); 
-
-            if (!clientId) {
-                console.error("Control acquire rejected: sender is not a registered web client"); 
-                sendError(socket, "You are not registered as an web client!"); 
-                return; 
-            }
-            
-            if (activeController) {
-                console.error(`Control acquire rejected for ${clientId}: controller already exists`);
-                sendError(socket, "Vehicle control is already acquired");
-                return;   
-            }
-
-            activeController = socket; 
-            sendAck(socket, MessageType.CONTROL_ACQUIRE); 
-            return; 
-        }
-
-        if (message.type === MessageType.CONTROL_RELEASE) {
-            const clientId = webClients.get(socket);
-
-            if (!clientId) {
-                console.error("Control release rejected: sender is not a registered web client");
-                sendError(socket, "You are not registered as a web client");
+            case MessageType.CLIENT_AUTH:
+                handleClientAuth(socket, message);
                 return;
-            }
 
-            if (socket !== activeController) {
-                const clientId = webClients.get(socket); 
-                console.log(`The client ${clientId} tried to release the controller, but is not an active controller`); 
-                sendError(socket, "You are not an active controller, thus cannot release control!"); 
-                return; 
-            }
+            case MessageType.CONTROL_ACQUIRE:
+                handleControlAcquire(socket);
+                return;
 
-            activeController = null; 
-            sendAck(socket, MessageType.CONTROL_RELEASE); 
+            case MessageType.CONTROL_RELEASE:
+                handleControlRelease(socket);
+                return;
 
-            return; 
+            case MessageType.VEHICLE_CONTROL:
+                handleVehicleControl(socket, message);
+                return;
+
+            case MessageType.VEHICLE_TELEMETRY:
+                handleVehicleTelemetry(socket, message);
+                return;
+
+            default:
+                const error = `Unsupported message type: ${message.type}`;
+                console.error(error);
+                sendError(socket, error);
         }
-
-        if (message.type === MessageType.VEHICLE_CONTROL) {
-            const clientId = webClients.get(socket); 
-
-            if (!clientId) {
-                console.error("Control rejected: sender is not a registered web client");
-                sendError(socket, "Control rejected: sender is not a registered web client");  
-                return; 
-            }
-            
-            if (socket !== activeController) {
-                sendError(socket, "You dont have permission to control the vehicle!"); 
-                return; 
-            }
-
-            if (!vehicleSocket || vehicleSocket.readyState !== WebSocket.OPEN) {
-                console.error("Control rejected: vehicle is offline"); 
-                sendError(socket, "Control rejected: vehicle is offline"); 
-                return; 
-            }
-
-            const payload = message.payload;
-           
-            const validationError = validateControlPayload(payload); 
-            if (validationError) {
-                console.error(validationError); 
-                sendError(socket, validationError); 
-                return; 
-            }
-
-            const controlPayload = payload as VehicleControlPayload;
-
-            vehicleSocket.send(
-                 JSON.stringify(message)
-            );
-
-            console.log(
-                `Control forwarded from ${clientId}: ` +
-                `throttle=${controlPayload.throttle}, ` +
-                `steering=${controlPayload.steering}, ` +
-                `sequence=${controlPayload.sequence}`
-            );
-
-            return; 
-        }
-
-        if (message.type === MessageType.VEHICLE_TELEMETRY) {
-            if (socket !== vehicleSocket) {
-                console.error("Only vehicle can produce telemetry!");
-                sendError(socket, "Only vehicle can produce telemetry!");  
-                return; 
-            }
-
-            const validationError = validateTelemetryPayload(message.payload); 
-            if (validationError) {
-                console.error(validationError); 
-                sendError(socket, validationError);
-                return; 
-            }
-
-            for (let clientSocket of webClients.keys()) {
-                if (clientSocket.readyState === WebSocket.OPEN)
-                    clientSocket.send(JSON.stringify(message)); 
-            }
-
-            return; 
-        }
-
-        const error = `Unsupported message type: ${message.type}`;
-        console.error(error);   
-        sendError(socket, error);
     }); 
 
     socket.on("close", () => {
@@ -250,62 +121,163 @@ server.on("connection", (socket) => {
     }); 
 });
 
-
-
-function validateControlPayload(payload: unknown): string | null {
-    if (!payload || typeof payload !== "object") {
-        return "Invalid payload";
+function handleDeviceAuth(socket: WebSocket): void {
+    if (vehicleSocket && vehicleSocket.readyState === WebSocket.OPEN) {
+        console.error("Vehicle is already registered"); 
+        sendError(socket, "Vehicle is already registered"); 
+        return; 
     }
+            
+    vehicleSocket = socket; 
+            
+    console.log("Vehicle registered"); 
+    sendAck(socket, MessageType.DEVICE_AUTH); 
 
-    // payload is already checked to be an object, but TypeScript still does not
-    // know its structure. Treat it as a generic object with string keys and
-    // unknown values, then validate each field explicitly below.
-    const {throttle, steering, sequence} = payload as Record<string, unknown>;
+    const statusMessage: VehicleStatusMessage = {
+        type: MessageType.VEHICLE_STATUS,
+        payload: {
+            online: true
+        }
+    };
 
-    if (
-        typeof throttle !== "number" ||
-        typeof steering !== "number" ||
-        !Number.isFinite(throttle) ||
-        !Number.isFinite(steering)
-    ) {
-        return "Throttle and steering must be numbers";
-    }
-
-    if (throttle < -1 || throttle > 1 || steering < -1 || steering > 1) {
-        return "Throttle and steering must be between -1 and 1";
-    }
-
-    if (
-        typeof sequence !== "number" ||
-        !Number.isInteger(sequence) ||
-        sequence <= 0
-    ) {
-        return "Sequence must be a positive integer";
-    }
-
-    return null;
+    broadcastToWebClients(statusMessage); 
 }
 
-function validateTelemetryPayload(payload: unknown): string | null {
-    if (!payload || typeof payload !== "object") {
-        return "Invalid telemetry payload";
+function handleClientAuth(socket: WebSocket, message: ClientAuthMessage): void {
+    const clientId = message.payload?.clientId; 
+
+    if (typeof clientId !== "string" || clientId.trim().length === 0) {
+        console.log("Invalid client ID"); 
+        sendError(socket, "Invalid client ID"); 
+        return;
     }
 
-    const {batteryVoltage, speed} = payload as Record<string, unknown>;
+    webClients.set(socket, clientId); 
 
-    if (typeof batteryVoltage !== "number" || !Number.isFinite(batteryVoltage)) {
-        return "Battery voltage must be a valid number";
+    console.log(`Web client registered: ${clientId}`); 
+    sendAck(socket, MessageType.CLIENT_AUTH); 
+
+    const vehicleOnline = 
+        vehicleSocket !== null && 
+        vehicleSocket.readyState === WebSocket.OPEN;  
+
+    const vehicleStatusMessage: VehicleStatusMessage = {
+        type: MessageType.VEHICLE_STATUS, 
+        payload: {
+            online: vehicleOnline
+        }
     }
 
-    if (batteryVoltage < 0) {
-        return "Battery voltage cannot be negative";
+    socket.send(JSON.stringify(vehicleStatusMessage)); 
+}
+
+function handleControlAcquire(socket: WebSocket): void {
+    const clientId = webClients.get(socket);
+    if (!clientId) {
+        console.error("Control acquire rejected: sender is not a registered web client"); 
+        sendError(socket, "You are not registered as an web client!"); 
+        return; 
+    }
+    
+    if (activeController) {
+        console.error(`Control acquire rejected for ${clientId}: controller already exists`);
+        sendError(socket, "Vehicle control is already acquired");
+        return;   
     }
 
-    if (typeof speed !== "number" || !Number.isFinite(speed)) {
-        return "Speed must be a valid number";
+    activeController = socket; 
+            
+    sendAck(socket, MessageType.CONTROL_ACQUIRE); 
+    console.log(`Control acquired by ${clientId}`); 
+            
+    return; 
+}
+
+function handleControlRelease(socket: WebSocket): void {
+    const clientId = webClients.get(socket);
+
+    if (!clientId) {
+        console.error("Control release rejected: sender is not a registered web client");
+        sendError(socket, "You are not registered as a web client");
+        return;
     }
 
-    return null;
+    if (socket !== activeController) {
+        console.log(`The client ${clientId} tried to release the controller, but is not an active controller`); 
+        sendError(socket, "You are not an active controller, thus cannot release control!"); 
+        return; 
+    }
+
+    activeController = null; 
+
+    console.log(`Control released by ${clientId}`); 
+    sendAck(socket, MessageType.CONTROL_RELEASE); 
+
+    return; 
+}
+
+function handleVehicleControl(socket: WebSocket, message: VehicleControlMessage): void {
+    const clientId = webClients.get(socket); 
+
+    if (!clientId) {
+        console.error("Control rejected: sender is not a registered web client");
+        sendError(socket, "Control rejected: sender is not a registered web client");  
+        return; 
+    }
+            
+    if (socket !== activeController) {
+        sendError(socket, "You dont have permission to control the vehicle!"); 
+        return; 
+    }
+
+    if (!vehicleSocket || vehicleSocket.readyState !== WebSocket.OPEN) {
+        console.error("Control rejected: vehicle is offline"); 
+        sendError(socket, "Control rejected: vehicle is offline"); 
+        return; 
+    }
+
+    const payload = message.payload;
+           
+    const validationError = validateControlPayload(payload); 
+    if (validationError) {
+        console.error(validationError); 
+        sendError(socket, validationError); 
+        return; 
+    }
+
+    const controlPayload = payload as VehicleControlPayload;
+
+    vehicleSocket.send(
+         JSON.stringify(message)
+    );
+
+    console.log(
+        `Control forwarded from ${clientId}: ` +
+        `throttle=${controlPayload.throttle}, ` +
+        `steering=${controlPayload.steering}, ` +
+        `sequence=${controlPayload.sequence}`
+    );
+
+    return; 
+}
+
+function handleVehicleTelemetry(socket: WebSocket, message: VehicleTelemetryMessage): void {
+    if (socket !== vehicleSocket) {
+        console.error("Only vehicle can produce telemetry!");
+        sendError(socket, "Only vehicle can produce telemetry!");  
+        return; 
+    }
+
+    const validationError = validateTelemetryPayload(message.payload); 
+    if (validationError) {
+        console.error(validationError); 
+        sendError(socket, validationError);
+        return; 
+    }
+
+    broadcastToWebClients(message); 
+
+    return; 
 }
 
 function sendAck(socket: WebSocket, messageType: string): void {
@@ -350,7 +322,7 @@ function broadcastToWebClients(message: object): void {
 
 // server.clients contains all currently connected WebSocket clients,
 // regardless of whether they are the vehicle or a web client.
-const hearbeatInterval = setInterval(() => {
+const heartbeatInterval = setInterval(() => {
     for (const clientSocket of server.clients) {
         const isAlive = socketLiveness.get(clientSocket); 
 
@@ -366,8 +338,8 @@ const hearbeatInterval = setInterval(() => {
         socketLiveness.set(clientSocket, false); 
         clientSocket.ping(); 
     }
-}, 10_000); 
+}, 10_000);
 
 server.on("close", () => {
-    clearInterval(hearbeatInterval); 
+    clearInterval(heartbeatInterval); 
 }); 
